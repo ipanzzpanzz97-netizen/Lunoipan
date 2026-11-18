@@ -320,6 +320,8 @@ data class TradePlanRecord(
   val status: TradePlanStatus = TradePlanStatus.OPEN,
   val exitPrice: Double? = null,
   val createdAtMs: Long = System.currentTimeMillis(),
+  val isLiveOrder: Boolean = false,
+  val lunoOrderId: String? = null,
 )
 
 data class SetupCondition(
@@ -340,6 +342,21 @@ data class HighProbabilitySetup(
 @JsonClass(generateAdapter = true)
 data class LunoPostOrderResponse(
   @Json(name = "order_id") val orderId: String = "",
+)
+
+@JsonClass(generateAdapter = true)
+data class LunoOrderEntry(
+  @Json(name = "order_id") val orderId: String = "",
+  val pair: String = "",
+  val state: String = "",
+  val type: String = "",
+  @Json(name = "limit_price") val limitPrice: String = "0",
+  @Json(name = "limit_volume") val limitVolume: String = "0",
+)
+
+@JsonClass(generateAdapter = true)
+data class LunoListOrdersResponse(
+  val orders: List<LunoOrderEntry>? = null,
 )
 
 @JsonClass(generateAdapter = true)

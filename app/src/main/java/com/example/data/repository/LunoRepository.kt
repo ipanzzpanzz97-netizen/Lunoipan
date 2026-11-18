@@ -4,6 +4,7 @@ import com.example.data.model.CachedCandleDto
 import com.example.data.model.CachedSnapshotData
 import com.example.data.model.CandlePoint
 import com.example.data.model.ChartTimeframe
+import com.example.data.model.LunoOrderEntry
 import com.example.data.model.MarketSnapshot
 import com.example.data.model.OrderBookLevel
 import com.example.data.model.OrderBookSnapshot
@@ -228,6 +229,7 @@ class LunoRepository(
     isBuy: Boolean,
     volume: Double,
     price: Double,
+    postOnly: Boolean = true,
   ): Result<String> =
     withContext(Dispatchers.IO) {
       runCatching {
@@ -235,10 +237,10 @@ class LunoRepository(
         require(creds.isConfigured) {
           "Simpan Luno API Key (kebenaran Trade) di Vault dahulu untuk hantar pesanan ke Luno."
         }
-        val safeVolume = volume.coerceAtLeast(pair.minOrderUnits)
+        val safeVolume = floorToDecimals(volume, pair.volumeDecimals).coerceAtLeast(pair.minOrderUnits)
         val formattedVol =
           if (pair.volumeDecimals == 0) {
-            kotlin.math.round(safeVolume).toInt().coerceAtLeast(1).toString()
+            safeVolume.toInt().coerceAtLeast(1).toString()
           } else {
             String.format(java.util.Locale.US, "%.${pair.volumeDecimals}f", safeVolume)
           }
@@ -261,7 +263,7 @@ class LunoRepository(
               type = if (isBuy) "BID" else "ASK",
               volume = formattedVol,
               price = formattedPrice,
-              postOnly = true,
+              postOnly = postOnly,
             )
           response.orderId
         } catch (e: retrofit2.HttpException) {
@@ -285,6 +287,35 @@ class LunoRepository(
         }
       }
     }
+
+  suspend fun fetchPendingOrders(pair: TradingPair): Result<List<LunoOrderEntry>> =
+    withContext(Dispatchers.IO) {
+      runCatching {
+        val creds = secureVault.getCredentials()
+        require(creds.isConfigured) {
+          "Luno API Key ID and Secret must be saved in the Vault first."
+        }
+        val headers =
+          HmacSigner.signRequest(
+            apiKeyId = creds.apiKeyId,
+            apiKeySecret = creds.apiKeySecret,
+            method = "GET",
+            requestPath = "/api/1/listorders",
+          )
+        lunoApi.getPendingOrders(
+          authorization = headers.authorizationBasic,
+          timestamp = headers.timestampMs,
+          signature = headers.hmacSha256Signature,
+          pair = pair.pairCode,
+          state = "PENDING",
+        ).orders.orEmpty()
+      }
+    }
+
+  private fun floorToDecimals(value: Double, decimals: Int): Double {
+    val factor = Math.pow(10.0, decimals.toDouble())
+    return kotlin.math.floor(value * factor + 1e-9) / factor
+  }
 
   suspend fun fetchAuthenticatedBalances(): Result<List<PortfolioAsset>> =
     withContext(Dispatchers.IO) {

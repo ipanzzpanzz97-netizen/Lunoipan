@@ -112,6 +112,8 @@ fun TerminalScreen(
   onRequestAiAnalysis: () -> Unit,
   onTogglePreferOfflineAi: () -> Unit,
   onToggleAutoPilot: (Boolean) -> Unit,
+  onSetLiveAutoTradeEnabled: (Boolean) -> Unit,
+  onSetLiveAutoTradeMaxOrderMyr: (Double) -> Unit,
   onAskAiQuestion: (String) -> Unit,
   onExecuteLunoOrder: (Boolean) -> Unit,
   onShowBanner: (String) -> Unit,
@@ -121,12 +123,21 @@ fun TerminalScreen(
   val context = LocalContext.current
   val snapshot = uiState.activeSnapshot
   var pendingOrderIsBuy by remember { mutableStateOf<Boolean?>(null) }
+  var showLiveBotConsentDialog by remember { mutableStateOf(false) }
 
   val notificationPermissionLauncher =
     rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
       onToggleAutoPilot(true)
       if (!granted) {
         onShowBanner("Auto-Monitor aktif, tetapi izin notifikasi ditolak (amaran skrin kekal aktif).")
+      }
+    }
+
+  val liveBotNotificationLauncher =
+    rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      showLiveBotConsentDialog = true
+      if (!granted) {
+        onShowBanner("Izin notifikasi ditolak — bot masih boleh jalan, tetapi notifikasi Luno tidak dipaparkan.")
       }
     }
 
@@ -146,6 +157,29 @@ fun TerminalScreen(
       }
     } else {
       onToggleAutoPilot(true)
+    }
+  }
+
+  fun handleLiveBotToggle(enable: Boolean) {
+    if (!enable) {
+      onSetLiveAutoTradeEnabled(false)
+      return
+    }
+    if (!uiState.credentials.isConfigured) {
+      onShowBanner("Sila simpan Luno API Key (kebenaran Trade) di tab Vault dahulu.")
+      return
+    }
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      val granted =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+          PackageManager.PERMISSION_GRANTED
+      if (granted) {
+        showLiveBotConsentDialog = true
+      } else {
+        liveBotNotificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+      }
+    } else {
+      showLiveBotConsentDialog = true
     }
   }
 
@@ -282,6 +316,8 @@ fun TerminalScreen(
             onRequestAiAnalysis = onRequestAiAnalysis,
             onTogglePreferOfflineAi = onTogglePreferOfflineAi,
             onToggleAutoPilot = ::handleAutoPilotToggle,
+            onToggleLiveAutoTrade = ::handleLiveBotToggle,
+            onSetLiveAutoTradeMaxOrderMyr = onSetLiveAutoTradeMaxOrderMyr,
             onAskAiQuestion = onAskAiQuestion,
             onPrepareLunoOrder = { isBuy -> pendingOrderIsBuy = isBuy },
           )
@@ -359,6 +395,19 @@ fun TerminalScreen(
           onExecuteLunoOrder(confirmIsBuy)
         },
         onDismiss = { pendingOrderIsBuy = null },
+      )
+    }
+
+    if (showLiveBotConsentDialog) {
+      LiveAutoTradeConsentDialog(
+        pair = uiState.selectedPair,
+        maxOrderMyr = uiState.preferences.liveAutoTradeMaxOrderMyr,
+        dailyCap = uiState.preferences.liveAutoTradeDailyCap,
+        onConfirmEnable = {
+          showLiveBotConsentDialog = false
+          onSetLiveAutoTradeEnabled(true)
+        },
+        onDismiss = { showLiveBotConsentDialog = false },
       )
     }
   }
@@ -1030,9 +1079,10 @@ private fun TradePlanRow(
         verticalAlignment = Alignment.CenterVertically,
       ) {
         Text(
-          text = "${plan.pairCode} • ${plan.status.name.replace('_', ' ')}",
+          text =
+            "${plan.pairCode} • ${if (plan.isLiveOrder) "LIVE LUNO" else "SIMULASI"} • ${plan.status.name.replace('_', ' ')}",
           style = MaterialTheme.typography.labelLarge,
-          color = colors.textPrimary,
+          color = if (plan.isLiveOrder) colors.emeraldBright else colors.textPrimary,
         )
         Text(
           text = "${FormatUtils.formatSignedPct(pnlPct)} (${FormatUtils.formatCurrency(pnlAmt, pair.quoteSymbol, 0)})",
@@ -1085,6 +1135,8 @@ private fun AiCopilotAndAutoMonitorCard(
   onRequestAiAnalysis: () -> Unit,
   onTogglePreferOfflineAi: () -> Unit,
   onToggleAutoPilot: (Boolean) -> Unit,
+  onToggleLiveAutoTrade: (Boolean) -> Unit,
+  onSetLiveAutoTradeMaxOrderMyr: (Double) -> Unit,
   onAskAiQuestion: (String) -> Unit,
   onPrepareLunoOrder: (Boolean) -> Unit,
 ) {
@@ -1240,7 +1292,7 @@ private fun AiCopilotAndAutoMonitorCard(
               color = colors.textSecondary,
             )
             Text(
-              text = "4. Apabila status BELI/JUAL keluar, tekan 'Beli/Jual Limit Luno' & sahkan (simpan API Key Luno dalam tab Vault terlebih dahulu).",
+              text = "4. Untuk beli & jual automatik tanpa sentuh, hidupkan 'Live Auto-Trade Bot' di bawah (wajib guna API Key Trade di Vault & pilih koin mesra modal kecil seperti XRP/MYR atau LTC/MYR).",
               style = MaterialTheme.typography.bodySmall,
               color = colors.textSecondary,
             )
@@ -1591,6 +1643,131 @@ private fun AiCopilotAndAutoMonitorCard(
           modifier = Modifier.testTag("auto_pilot_switch"),
         )
       }
+
+      HorizontalDivider(color = colors.border)
+
+      // Live Auto-Trade Bot Luno (Opt-in Real Execution with Safety Caps)
+      Surface(
+        color = if (uiState.preferences.liveAutoTradeEnabled) colors.emeraldContainer.copy(alpha = 0.45f) else colors.charcoal,
+        shape = MaterialTheme.shapes.small,
+        border =
+          BorderStroke(
+            1.dp,
+            if (uiState.preferences.liveAutoTradeEnabled) colors.emeraldBright.copy(alpha = 0.65f) else colors.border,
+          ),
+      ) {
+        Column(
+          modifier = Modifier.fillMaxWidth().padding(12.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+              ) {
+                Text(
+                  text = "LIVE AUTO-TRADE BOT (LUNO)",
+                  style = MaterialTheme.typography.labelSmall,
+                  color =
+                    if (uiState.preferences.liveAutoTradeEnabled) colors.emeraldBright else colors.amber,
+                )
+                Surface(
+                  color = colors.charcoalDeep,
+                  shape = MaterialTheme.shapes.small,
+                ) {
+                  Text(
+                    text =
+                      if (uiState.preferences.liveAutoTradeEnabled) {
+                        "AKTIF • ${uiState.preferences.liveAutoTradeCountToday}/${uiState.preferences.liveAutoTradeDailyCap}"
+                      } else {
+                        "MATI"
+                      },
+                    style = QuantMonoSmall,
+                    color =
+                      if (uiState.preferences.liveAutoTradeEnabled) colors.emeraldBright else colors.textMuted,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                  )
+                }
+              }
+              Text(
+                text = "Beli A+ & Jual TP/SL automatik terus ke Luno (semakan 15s di skrin + 15 minit di latar belakang).",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+              )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Switch(
+              checked = uiState.preferences.liveAutoTradeEnabled,
+              onCheckedChange = { onToggleLiveAutoTrade(it) },
+              colors =
+                SwitchDefaults.colors(
+                  checkedThumbColor = colors.charcoalDeep,
+                  checkedTrackColor = colors.emeraldBright,
+                  uncheckedThumbColor = colors.textMuted,
+                  uncheckedTrackColor = colors.slate,
+                ),
+              modifier = Modifier.testTag("live_auto_trade_switch"),
+            )
+          }
+
+          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+              text = "HAD MAKSIMUM PER ORDER BOT (${pair.quoteSymbol}):",
+              style = MaterialTheme.typography.labelSmall,
+              color = colors.textMuted,
+            )
+            LazyRow(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              val budgets = listOf(10.0, 25.0, 50.0, 100.0)
+              items(budgets) { amt ->
+                val isSelected = kotlin.math.abs(uiState.preferences.liveAutoTradeMaxOrderMyr - amt) < 0.5
+                FilterChip(
+                  selected = isSelected,
+                  onClick = { onSetLiveAutoTradeMaxOrderMyr(amt) },
+                  label = {
+                    Text(
+                      text = "${pair.quoteSymbol} ${amt.toInt()}",
+                      style = QuantMonoSmall,
+                    )
+                  },
+                  colors =
+                    FilterChipDefaults.filterChipColors(
+                      containerColor = colors.slate,
+                      labelColor = colors.textSecondary,
+                      selectedContainerColor = colors.cyanContainer,
+                      selectedLabelColor = colors.cyanBright,
+                    ),
+                  border =
+                    FilterChipDefaults.filterChipBorder(
+                      enabled = true,
+                      selected = isSelected,
+                      borderColor = colors.border,
+                      selectedBorderColor = colors.cyanBright,
+                    ),
+                  modifier = Modifier.testTag("bot_budget_${amt.toInt()}"),
+                )
+              }
+            }
+          }
+
+          val botLog = uiState.preferences.lastAutoTradeLog
+          if (botLog.isNotBlank()) {
+            Text(
+              text = "Status Bot: $botLog",
+              style = MaterialTheme.typography.bodySmall,
+              color = colors.cyanBright,
+              modifier = Modifier.testTag("live_auto_trade_log"),
+            )
+          }
+        }
+      }
     }
   }
 }
@@ -1710,5 +1887,70 @@ private fun QuantPulseViewModelHelperPreview(
   stopLossPct = stopLossPct,
   entryPrice = entryPrice,
 )
+
+@Composable
+private fun LiveAutoTradeConsentDialog(
+  pair: TradingPair,
+  maxOrderMyr: Double,
+  dailyCap: Int,
+  onConfirmEnable: () -> Unit,
+  onDismiss: () -> Unit,
+) {
+  val colors = LocalQuantColors.current
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    containerColor = colors.slate,
+    titleContentColor = colors.textPrimary,
+    textContentColor = colors.textSecondary,
+    modifier = Modifier.testTag("live_auto_trade_consent_dialog"),
+    title = {
+      Text(
+        text = "Aktifkan Live Auto-Trade Bot?",
+        style = MaterialTheme.typography.titleMedium,
+      )
+    },
+    text = {
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+          text = "Dengan mengaktifkan mod ini, aplikasi akan menghantar pesanan BELI & JUAL Limit sebenar ke akaun Luno anda secara automatik apabila isyarat AI/Quant dicapai.",
+          style = MaterialTheme.typography.bodySmall,
+          color = colors.textPrimary,
+        )
+        Text(
+          text = "• Koin Dipantau: ${pair.displayName}\n• Had Maks Order: ${pair.quoteSymbol} ${maxOrderMyr.toInt()} (ikut baki Luno)\n• Had Keselamatan: Maks $dailyCap order/hari & cooldown 5 minit\n• Kebenaran API Vault wajib mempunyai akses 'Trade'",
+          style = MaterialTheme.typography.bodySmall,
+          color = colors.cyanBright,
+        )
+        Text(
+          text = "Amaran Risiko: Dagangan kripto ada risiko kerugian dan tiada jaminan untung 100%. Mod latar belakang WorkManager berjalan setiap ~15 minit ketika aplikasi ditutup, dan setiap 15 saat ketika aplikasi dibuka.",
+          style = MaterialTheme.typography.bodySmall,
+          color = colors.amber,
+        )
+      }
+    },
+    confirmButton = {
+      Button(
+        onClick = onConfirmEnable,
+        colors =
+          ButtonDefaults.buttonColors(
+            containerColor = colors.emerald,
+            contentColor = colors.charcoalDeep,
+          ),
+        modifier = Modifier.testTag("confirm_enable_live_bot_button"),
+      ) {
+        Text("Faham & Aktifkan Bot")
+      }
+    },
+    dismissButton = {
+      TextButton(
+        onClick = onDismiss,
+        modifier = Modifier.testTag("cancel_enable_live_bot_button"),
+      ) {
+        Text("Batal", color = colors.textSecondary)
+      }
+    },
+  )
+}
+
 
 

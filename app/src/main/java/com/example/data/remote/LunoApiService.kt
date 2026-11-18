@@ -3,6 +3,7 @@ package com.example.data.remote
 import com.example.data.model.CoinGeckoMarketChartResponse
 import com.example.data.model.LunoBalanceResponse
 import com.example.data.model.LunoCandlesResponse
+import com.example.data.model.LunoListOrdersResponse
 import com.example.data.model.LunoOrderBookTopResponse
 import com.example.data.model.LunoPostOrderResponse
 import com.example.data.model.LunoTickerResponse
@@ -45,6 +46,15 @@ interface LunoApiService {
     @Header("X-Timestamp") timestamp: String,
     @Header("X-HMAC-SHA256-Signature") signature: String,
   ): LunoBalanceResponse
+
+  @GET("api/1/listorders")
+  suspend fun getPendingOrders(
+    @Header("Authorization") authorization: String,
+    @Header("X-Timestamp") timestamp: String,
+    @Header("X-HMAC-SHA256-Signature") signature: String,
+    @Query("pair") pair: String,
+    @Query("state") state: String = "PENDING",
+  ): LunoListOrdersResponse
 
   @FormUrlEncoded
   @POST("api/1/postorder")

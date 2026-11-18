@@ -16,12 +16,14 @@ import com.example.data.model.TradePlanRecord
 import com.example.data.model.TradePlanStatus
 import com.example.data.model.TradingPair
 import com.example.data.repository.LunoRepository
+import com.example.domain.AutoTradeCoordinator
 import com.example.domain.QuantEngine
 import com.example.domain.TradingAiEngine
 import com.example.notifications.DcaReminderScheduler
 import com.example.security.SecureVault
 import com.example.security.UserQuantPreferences
 import com.example.security.VaultCredentials
+import com.example.worker.AutoTradeWorkScheduler
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -138,6 +140,8 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
   private val repository = LunoRepository(secureVault)
   private val dcaScheduler = DcaReminderScheduler(application)
   private val tradingAiEngine = TradingAiEngine(application)
+  private val autoTradeCoordinator = AutoTradeCoordinator(secureVault, repository, dcaScheduler)
+  private val workScheduler = AutoTradeWorkScheduler(application)
 
   private val _uiState = MutableStateFlow(QuantPulseUiState())
   val uiState: StateFlow<QuantPulseUiState> = _uiState.asStateFlow()
@@ -155,6 +159,7 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
   private fun observeVaultData() {
     viewModelScope.launch {
       secureVault.preferencesFlow.collect { prefs ->
+        workScheduler.syncSchedule(prefs.autoPilotEnabled || prefs.liveAutoTradeEnabled)
         val dcaSummary =
           QuantEngine.calculateDcaProjection(
             monthlyContribution = prefs.dcaMonthlyAmount,
@@ -385,6 +390,9 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
             isOfflineMode = state.preferOfflineAi || state.isOfflineDataMode,
           )
         _uiState.update { it.copy(isAiLoading = false, aiAdvice = advice) }
+        if (!state.isOfflineDataMode) {
+          runAutoPilotEvaluation(snapshot, advice)
+        }
       }
   }
 
@@ -454,87 +462,74 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
     }
   }
 
+  fun setLiveAutoTradeEnabled(enabled: Boolean) {
+    viewModelScope.launch {
+      if (enabled && !_uiState.value.credentials.isConfigured) {
+        _uiState.update {
+          it.copy(
+            statusBannerMessage =
+              "Sila simpan API Key Luno (kebenaran Trade) di tab Vault dahulu sebelum hidupkan Bot Auto-Trade.",
+          )
+        }
+        return@launch
+      }
+      val statusNote =
+        if (enabled) {
+          "Live Auto-Trade Bot DIAKTIFKAN. Memantau isyarat Beli A+ & TP/SL automatik."
+        } else {
+          "Live Auto-Trade Bot dimatikan oleh pengguna."
+        }
+      secureVault.setLiveAutoTradeEnabled(enabled, statusNote)
+      workScheduler.syncSchedule(enabled || _uiState.value.preferences.autoPilotEnabled)
+      _uiState.update { it.copy(statusBannerMessage = statusNote) }
+      if (enabled) {
+        _uiState.value.activeSnapshot?.let { snap ->
+          runAutoPilotEvaluation(snap, _uiState.value.aiAdvice)
+        }
+      }
+    }
+  }
+
+  fun setLiveAutoTradeMaxOrderMyr(amountMyr: Double) {
+    viewModelScope.launch {
+      secureVault.setLiveAutoTradeMaxOrderMyr(amountMyr)
+      _uiState.update {
+        it.copy(
+          statusBannerMessage =
+            "Had maksimum per order Bot ditetapkan ke RM ${FormatUtils.formatNumber(amountMyr, 0)}.",
+        )
+      }
+    }
+  }
+
   fun showStatusMessage(message: String) {
     _uiState.update { it.copy(statusBannerMessage = message) }
   }
 
-  private fun runAutoPilotEvaluation(snapshot: MarketSnapshot) {
-    val state = _uiState.value
-    if (!state.preferences.autoPilotEnabled) return
-
-    val pairCode = snapshot.pair.pairCode
-    var plansChanged = false
-    val currentPlans = state.tradePlans.toMutableList()
-
-    // 1. Monitor open trades for automatic TP / SL hits on live Luno ticks
-    for (i in currentPlans.indices) {
-      val plan = currentPlans[i]
-      if (plan.status == TradePlanStatus.OPEN && plan.pairCode == pairCode) {
-        if (snapshot.lastPrice >= plan.takeProfitPrice) {
-          currentPlans[i] =
-            plan.copy(status = TradePlanStatus.CLOSED_WIN, exitPrice = snapshot.lastPrice)
-          plansChanged = true
-          dcaScheduler.sendAutoPilotSignalNotification(
-            title = "Auto-Pilot TAKE PROFIT ($pairCode)",
-            message =
-              "Sasaran TP dicapai pada ${FormatUtils.formatCurrency(snapshot.lastPrice, snapshot.pair.quoteSymbol, snapshot.pair.priceDecimals)}! Keuntungan dikunci.",
-          )
-        } else if (snapshot.lastPrice <= plan.stopLossPrice) {
-          currentPlans[i] =
-            plan.copy(status = TradePlanStatus.CLOSED_LOSS, exitPrice = snapshot.lastPrice)
-          plansChanged = true
-          dcaScheduler.sendAutoPilotSignalNotification(
-            title = "Auto-Pilot STOP-LOSS ($pairCode)",
-            message =
-              "Had risiko 1%–2% melindungi modal pada ${FormatUtils.formatCurrency(snapshot.lastPrice, snapshot.pair.quoteSymbol, snapshot.pair.priceDecimals)}.",
+  private fun runAutoPilotEvaluation(
+    snapshot: MarketSnapshot,
+    adviceOverride: AiTradeAdvice? = _uiState.value.aiAdvice,
+  ) {
+    val currentAssets =
+      (_uiState.value.portfolioState as? PortfolioUiState.Success)?.assets
+    viewModelScope.launch {
+      val result =
+        autoTradeCoordinator.evaluateTick(
+          snapshot = snapshot,
+          advice = adviceOverride,
+          cachedAssets = currentAssets,
+        )
+      val refreshed = result.refreshedBalances
+      if (refreshed != null) {
+        _uiState.update {
+          it.copy(
+            portfolioState = PortfolioUiState.Success(refreshed, System.currentTimeMillis()),
           )
         }
       }
-    }
-
-    // 2. Auto-detect high-probability oversold entry if no open position exists for this pair
-    val hasOpenForPair =
-      currentPlans.any { it.status == TradePlanStatus.OPEN && it.pairCode == pairCode }
-    val setup =
-      QuantEngine.evaluateHighProbabilitySetup(
-        rsi14 = snapshot.signal.rsi14,
-        isGoldenCross = snapshot.signal.isGoldenCross,
-        spreadPct = snapshot.spreadPct,
-        bidImbalanceRatio = snapshot.orderBook.bidImbalanceRatio,
-        bestBid = snapshot.bid,
-        lastPrice = snapshot.lastPrice,
-      )
-    if (!hasOpenForPair && setup.passedCount >= 3 && snapshot.signal.rsi14 < 38.0) {
-      val pos =
-        QuantEngine.calculatePositionSize(
-          totalCapital = state.preferences.totalCapitalMyr,
-          requestedRiskTolerancePct = state.preferences.riskTolerancePct,
-          stopLossPct = state.preferences.defaultStopLossPct,
-          entryPrice = setup.suggestedLimitPrice,
-        )
-      val autoPlan =
-        TradePlanRecord(
-          id = UUID.randomUUID().toString(),
-          pairCode = pairCode,
-          entryPrice = pos.entryPrice,
-          allocatedAmount = pos.spotCappedPositionSize,
-          units = pos.unitsToAcquire,
-          stopLossPrice = pos.stopLossPrice,
-          takeProfitPrice = pos.takeProfit2RPrice,
-          status = TradePlanStatus.OPEN,
-          createdAtMs = System.currentTimeMillis(),
-        )
-      currentPlans.add(0, autoPlan)
-      plansChanged = true
-      dcaScheduler.sendAutoPilotSignalNotification(
-        title = "Auto-Monitor BELI A+ ($pairCode)",
-        message =
-          "Isyarat RSI ${String.format("%.1f", snapshot.signal.rsi14)} (${setup.passedCount}/4 lulus). Limit Bid: ${FormatUtils.formatCurrency(pos.entryPrice, snapshot.pair.quoteSymbol, snapshot.pair.priceDecimals)}.",
-      )
-    }
-
-    if (plansChanged) {
-      viewModelScope.launch { secureVault.saveTradePlans(currentPlans) }
+      if (result.executedLiveOrder && !result.logMessage.isNullOrBlank()) {
+        _uiState.update { it.copy(statusBannerMessage = result.logMessage) }
+      }
     }
   }
 
@@ -571,6 +566,8 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
               takeProfitPrice = pos.takeProfit2RPrice,
               status = TradePlanStatus.OPEN,
               createdAtMs = System.currentTimeMillis(),
+              isLiveOrder = true,
+              lunoOrderId = orderId,
             )
           secureVault.saveTradePlans(listOf(newPlan) + _uiState.value.tradePlans)
           _uiState.update {

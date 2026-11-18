@@ -237,6 +237,8 @@ fun QuantPulseApp(
               onRequestAiAnalysis = viewModel::requestAiAnalysis,
               onTogglePreferOfflineAi = viewModel::togglePreferOfflineAi,
               onToggleAutoPilot = { viewModel.toggleAutoPilot(it) },
+              onSetLiveAutoTradeEnabled = viewModel::setLiveAutoTradeEnabled,
+              onSetLiveAutoTradeMaxOrderMyr = viewModel::setLiveAutoTradeMaxOrderMyr,
               onAskAiQuestion = viewModel::askAiQuestion,
               onExecuteLunoOrder = viewModel::executeConfirmedLunoOrder,
               onShowBanner = viewModel::showStatusMessage,

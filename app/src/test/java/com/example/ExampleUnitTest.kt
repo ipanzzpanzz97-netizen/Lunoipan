@@ -177,4 +177,35 @@ class ExampleUnitTest {
     val buyAnswer = engine.generateOfflineChatAnswer("Sesuai beli sekarang?", bullSnapshot, bullishSetup, pos)
     assertTrue(buyAnswer.contains("RSI(14)"))
   }
+
+  @Test
+  fun `auto trade coordinator enforces Luno min order and available RM 10 balance`() {
+    val xrpUnits =
+      com.example.domain.AutoTradeCoordinator.computeSafeLiveBuyVolume(
+        availableQuote = 10.0,
+        maxOrderMyr = 10.0,
+        riskSizedMyr = 5.0,
+        limitPrice = 4.20,
+        pair = com.example.data.model.TradingPair.XRPMYR,
+      )
+    assertEquals(1.0, xrpUnits ?: 0.0, 0.0001)
+
+    val btcInsufficient =
+      com.example.domain.AutoTradeCoordinator.computeSafeLiveBuyVolume(
+        availableQuote = 10.0,
+        maxOrderMyr = 10.0,
+        riskSizedMyr = 10.0,
+        limitPrice = 400_000.0,
+        pair = com.example.data.model.TradingPair.XBTMYR,
+      )
+    assertEquals(null, btcInsufficient)
+
+    val sellUnits =
+      com.example.domain.AutoTradeCoordinator.computeSafeSellVolume(
+        plannedUnits = 2.0,
+        availableBase = 1.9,
+        pair = com.example.data.model.TradingPair.XRPMYR,
+      )
+    assertEquals(1.0, sellUnits ?: 0.0, 0.0001)
+  }
 }

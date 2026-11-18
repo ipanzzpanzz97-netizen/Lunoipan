@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.data.model.CachedSnapshotData
@@ -52,6 +53,13 @@ data class UserQuantPreferences(
   val dcaFrequency: DcaFrequency = DcaFrequency.WEEKLY,
   val profitGoalPct: Double = 95.0,
   val autoPilotEnabled: Boolean = true,
+  val liveAutoTradeEnabled: Boolean = false,
+  val liveAutoTradeMaxOrderMyr: Double = 10.0,
+  val liveAutoTradeDailyCap: Int = 4,
+  val liveAutoTradeCountToday: Int = 0,
+  val liveAutoTradeDateKey: String = "",
+  val lastLiveAutoTradeEpochMs: Long = 0L,
+  val lastAutoTradeLog: String = "",
 )
 
 class SecureVault(context: Context) {
@@ -85,6 +93,13 @@ class SecureVault(context: Context) {
     val PROFIT_GOAL_PCT = doublePreferencesKey("profit_goal_pct")
     val TRADE_PLANS_JSON = stringPreferencesKey("trade_plans_json")
     val AUTO_PILOT_ENABLED = booleanPreferencesKey("auto_pilot_enabled")
+    val LIVE_AUTO_TRADE_ENABLED = booleanPreferencesKey("live_auto_trade_enabled")
+    val LIVE_AUTO_TRADE_MAX_MYR = doublePreferencesKey("live_auto_trade_max_myr")
+    val LIVE_AUTO_TRADE_DAILY_CAP = intPreferencesKey("live_auto_trade_daily_cap")
+    val LIVE_AUTO_TRADE_COUNT_TODAY = intPreferencesKey("live_auto_trade_count_today")
+    val LIVE_AUTO_TRADE_DATE_KEY = stringPreferencesKey("live_auto_trade_date_key")
+    val LAST_LIVE_AUTO_TRADE_MS = longPreferencesKey("last_live_auto_trade_ms")
+    val LAST_AUTO_TRADE_LOG = stringPreferencesKey("last_auto_trade_log")
     fun cachedSnapshotKey(pairCode: String) = stringPreferencesKey("cached_snapshot_$pairCode")
   }
 
@@ -116,6 +131,13 @@ class SecureVault(context: Context) {
           }.getOrDefault(DcaFrequency.WEEKLY),
         profitGoalPct = (prefs[Keys.PROFIT_GOAL_PCT] ?: 95.0).coerceIn(10.0, 500.0),
         autoPilotEnabled = prefs[Keys.AUTO_PILOT_ENABLED] ?: true,
+        liveAutoTradeEnabled = prefs[Keys.LIVE_AUTO_TRADE_ENABLED] ?: false,
+        liveAutoTradeMaxOrderMyr = (prefs[Keys.LIVE_AUTO_TRADE_MAX_MYR] ?: 10.0).coerceIn(5.0, 50000.0),
+        liveAutoTradeDailyCap = (prefs[Keys.LIVE_AUTO_TRADE_DAILY_CAP] ?: 4).coerceIn(1, 12),
+        liveAutoTradeCountToday = (prefs[Keys.LIVE_AUTO_TRADE_COUNT_TODAY] ?: 0).coerceAtLeast(0),
+        liveAutoTradeDateKey = prefs[Keys.LIVE_AUTO_TRADE_DATE_KEY].orEmpty(),
+        lastLiveAutoTradeEpochMs = prefs[Keys.LAST_LIVE_AUTO_TRADE_MS] ?: 0L,
+        lastAutoTradeLog = prefs[Keys.LAST_AUTO_TRADE_LOG].orEmpty(),
       )
     }
 
@@ -140,6 +162,37 @@ class SecureVault(context: Context) {
 
   suspend fun setAutoPilotEnabled(enabled: Boolean) {
     dataStore.edit { it[Keys.AUTO_PILOT_ENABLED] = enabled }
+  }
+
+  suspend fun setLiveAutoTradeEnabled(enabled: Boolean, logMessage: String? = null) {
+    dataStore.edit { prefs ->
+      prefs[Keys.LIVE_AUTO_TRADE_ENABLED] = enabled
+      if (logMessage != null) {
+        prefs[Keys.LAST_AUTO_TRADE_LOG] = logMessage
+      }
+    }
+  }
+
+  suspend fun setLiveAutoTradeMaxOrderMyr(amountMyr: Double) {
+    dataStore.edit { it[Keys.LIVE_AUTO_TRADE_MAX_MYR] = amountMyr.coerceIn(5.0, 50000.0) }
+  }
+
+  suspend fun updateAutoTradeLog(logMessage: String) {
+    dataStore.edit { it[Keys.LAST_AUTO_TRADE_LOG] = logMessage }
+  }
+
+  suspend fun recordLiveAutoTradeExecution(
+    dateKey: String,
+    countToday: Int,
+    timestampMs: Long,
+    logMessage: String,
+  ) {
+    dataStore.edit { prefs ->
+      prefs[Keys.LIVE_AUTO_TRADE_DATE_KEY] = dateKey
+      prefs[Keys.LIVE_AUTO_TRADE_COUNT_TODAY] = countToday
+      prefs[Keys.LAST_LIVE_AUTO_TRADE_MS] = timestampMs
+      prefs[Keys.LAST_AUTO_TRADE_LOG] = logMessage
+    }
   }
 
   suspend fun saveCachedSnapshot(data: CachedSnapshotData) {
