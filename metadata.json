@@ -1,0 +1,8 @@
+{
+  "name": "QuantPulse",
+  "description": "Quantitative crypto market terminal, RSI/EMA signal analyzer, position sizing calculator, and DCA planner for Luno Exchange.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">QuantPulse</string>
+    <string name="nav_terminal">Terminal</string>
+    <string name="nav_analysis">Signals</string>
+    <string name="nav_dca">DCA Plan</string>
+    <string name="nav_vault">Vault</string>
+    <string name="risk_disclaimer">Quantitative analytics and signals are for disciplined decision support only. Markets carry risk; no algorithm guarantees future profits.</string>
+    <string name="dca_channel_name">DCA Investment Reminders</string>
+    <string name="dca_channel_desc">Scheduled reminders for disciplined Dollar-Cost Averaging</string>
+</resources>
