@@ -137,7 +137,7 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
   private val secureVault = SecureVault(application)
   private val repository = LunoRepository(secureVault)
   private val dcaScheduler = DcaReminderScheduler(application)
-  private val tradingAiEngine = TradingAiEngine()
+  private val tradingAiEngine = TradingAiEngine(application)
 
   private val _uiState = MutableStateFlow(QuantPulseUiState())
   val uiState: StateFlow<QuantPulseUiState> = _uiState.asStateFlow()
@@ -219,11 +219,19 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
 
   fun selectPair(pair: TradingPair) {
     if (_uiState.value.selectedPair == pair) return
+    aiJob?.cancel()
+    aiChatJob?.cancel()
     _uiState.update {
       it.copy(
         selectedPair = pair,
         calcEntryPriceOverride = null,
         marketState = MarketUiState.Loading,
+        aiAdvice = null,
+        isAiLoading = false,
+        aiChatQuestion = null,
+        aiChatAnswer = null,
+        aiChatSource = null,
+        isAiChatStreaming = false,
       )
     }
     viewModelScope.launch {
@@ -269,7 +277,8 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
 
     result
       .onSuccess { snapshot ->
-        val hadNoAdvice = _uiState.value.aiAdvice == null || _uiState.value.selectedPair != snapshot.pair
+        val hadNoAdvice =
+          _uiState.value.aiAdvice == null || current.activeSnapshot?.pair != snapshot.pair
         _uiState.update {
           it.copy(
             isRefreshing = false,
@@ -277,7 +286,11 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
             marketState = MarketUiState.Success(snapshot),
           )
         }
-        evaluateOfflineBaselineAndMaybeOnlineAi(snapshot, triggerOnline = hadNoAdvice)
+        evaluateOfflineBaselineAndMaybeOnlineAi(
+          snapshot = snapshot,
+          triggerOnline = hadNoAdvice,
+          forceRefresh = hadNoAdvice,
+        )
         runAutoPilotEvaluation(snapshot)
       }
       .onFailure { error ->
@@ -298,7 +311,11 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
           )
         }
         if (offlineCached != null) {
-          evaluateOfflineBaselineAndMaybeOnlineAi(offlineCached, triggerOnline = false)
+          evaluateOfflineBaselineAndMaybeOnlineAi(
+            snapshot = offlineCached,
+            triggerOnline = false,
+            forceRefresh = true,
+          )
         }
       }
   }
@@ -306,6 +323,7 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
   private fun evaluateOfflineBaselineAndMaybeOnlineAi(
     snapshot: MarketSnapshot,
     triggerOnline: Boolean,
+    forceRefresh: Boolean = false,
   ) {
     val state = _uiState.value
     val setup =
@@ -325,7 +343,7 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
         entryPrice = snapshot.ask.takeIf { it > 0.0 } ?: snapshot.lastPrice,
       )
 
-    if (state.aiAdvice == null || state.isOfflineDataMode || state.preferOfflineAi) {
+    if (forceRefresh || state.aiAdvice == null || state.isOfflineDataMode || state.preferOfflineAi) {
       val offlineAdvice =
         tradingAiEngine.generateOfflineAdvice(
           snapshot = snapshot,
@@ -703,9 +721,25 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
       repository
         .fetchAuthenticatedBalances()
         .onSuccess { assets ->
-          _uiState.update {
-            it.copy(
+          val myrBalance = assets.firstOrNull { it.asset == "MYR" }?.available
+          val shouldAutoSyncCapital =
+            myrBalance != null &&
+              myrBalance >= 1.0 &&
+              _uiState.value.preferences.totalCapitalMyr == 10_000.0
+          _uiState.update { state ->
+            state.copy(
               portfolioState = PortfolioUiState.Success(assets, System.currentTimeMillis()),
+              calcTotalCapital =
+                if (shouldAutoSyncCapital && myrBalance != null) myrBalance
+                else state.calcTotalCapital,
+            )
+          }
+          if (shouldAutoSyncCapital && myrBalance != null) {
+            val prefs = _uiState.value.preferences
+            secureVault.updateRiskSettings(
+              totalCapitalMyr = myrBalance,
+              riskTolerancePct = prefs.riskTolerancePct,
+              stopLossPct = prefs.defaultStopLossPct,
             )
           }
         }
@@ -720,6 +754,24 @@ class QuantPulseViewModel(application: Application) : AndroidViewModel(applicati
           }
         }
     }
+  }
+
+  fun syncCapitalFromLunoBalance() {
+    val portfolio = _uiState.value.portfolioState as? PortfolioUiState.Success ?: return
+    val quoteAsset = _uiState.value.selectedPair.quoteAsset
+    val matched =
+      portfolio.assets.firstOrNull { it.asset == quoteAsset }
+        ?: portfolio.assets.firstOrNull { it.asset == "MYR" }
+        ?: return
+    if (matched.available <= 0.0) {
+      showStatusMessage("Baki ${matched.asset} dalam Luno adalah 0.")
+      return
+    }
+    val prefs = _uiState.value.preferences
+    saveRiskPreferences(matched.available, prefs.riskTolerancePct, prefs.defaultStopLossPct)
+    showStatusMessage(
+      "Modal dagangan disegerakkan ke baki Luno: ${FormatUtils.formatNumber(matched.available, 2)} ${matched.asset}.",
+    )
   }
 
   fun logCurrentTradePlan() {

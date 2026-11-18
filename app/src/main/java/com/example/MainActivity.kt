@@ -265,6 +265,7 @@ fun QuantPulseApp(
               onClearCredentials = viewModel::clearLunoCredentials,
               onRefreshBalances = viewModel::refreshPortfolioBalance,
               onSaveRiskRules = viewModel::saveRiskPreferences,
+              onSyncCapitalFromLuno = viewModel::syncCapitalFromLunoBalance,
             )
           }
         }

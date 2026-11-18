@@ -160,11 +160,13 @@ fun DcaPlannerScreen(
             Row(
               modifier = Modifier.fillMaxWidth(),
               horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically,
             ) {
               Text(
                 text = "Est. Compounding Gain: +${FormatUtils.formatCurrency(summary.totalGain, symbol, 0)}",
                 style = QuantMonoSmall,
                 color = colors.emeraldBright,
+                modifier = Modifier.weight(1f).padding(end = 8.dp),
               )
               Text(
                 text = FormatUtils.formatSignedPct(summary.returnPct),
@@ -205,11 +207,13 @@ fun DcaPlannerScreen(
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
               ) {
                 Text(
                   text = "Horizon Duration",
                   style = MaterialTheme.typography.bodyMedium,
                   color = colors.textSecondary,
+                  modifier = Modifier.weight(1f).padding(end = 8.dp),
                 )
                 Text(
                   text = "${prefs.dcaDurationMonths} Months",
@@ -234,11 +238,13 @@ fun DcaPlannerScreen(
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
               ) {
                 Text(
-                  text = "Projected Annual Return (Simulation)",
+                  text = "Projected Annual Return",
                   style = MaterialTheme.typography.bodyMedium,
                   color = colors.textSecondary,
+                  modifier = Modifier.weight(1f).padding(end = 8.dp),
                 )
                 Text(
                   text = "${String.format(Locale.US, "%.1f", prefs.dcaAnnualYieldPct)}% APY",

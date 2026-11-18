@@ -128,14 +128,16 @@ fun SignalsScreen(
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
               ) {
                 Text(
                   text = "SOURCE: ${snapshot.signal.candleSource.uppercase()}",
                   style = MaterialTheme.typography.labelSmall,
                   color = colors.textMuted,
+                  modifier = Modifier.weight(1f).padding(end = 8.dp),
                 )
                 Text(
-                  text = "TAP CHART TO INSPECT",
+                  text = "TAP TO INSPECT",
                   style = MaterialTheme.typography.labelSmall,
                   color = colors.cyan,
                 )

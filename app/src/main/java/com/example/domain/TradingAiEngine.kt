@@ -1,5 +1,6 @@
 package com.example.domain
 
+import android.content.Context
 import android.util.Log
 import com.example.data.model.AiEngineSource
 import com.example.data.model.AiTradeAdvice
@@ -9,6 +10,7 @@ import com.example.data.model.MarketSnapshot
 import com.example.data.model.PositionSizeResult
 import com.example.data.model.SignalAction
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.Schema
 import com.google.firebase.ai.type.generationConfig
@@ -20,7 +22,20 @@ import org.json.JSONObject
 
 private const val TAG = "TradingAiEngine"
 
-class TradingAiEngine {
+class TradingAiEngine(private val appContext: Context? = null) {
+
+  private fun isFirebaseReady(): Boolean {
+    return try {
+      val ctx = appContext ?: return false
+      if (FirebaseApp.getApps(ctx).isEmpty()) {
+        FirebaseApp.initializeApp(ctx)
+      }
+      FirebaseApp.getApps(ctx).isNotEmpty()
+    } catch (e: Exception) {
+      Log.w(TAG, "FirebaseApp unavailable; using Offline Quant AI", e)
+      false
+    }
+  }
 
   private val tradeAdviceSchema =
     Schema.obj(
@@ -69,6 +84,11 @@ class TradingAiEngine {
     if (isOfflineMode) {
       return offlineBaseline
     }
+    if (!isFirebaseReady()) {
+      return offlineBaseline.copy(
+        onlineErrorNote = "Enjin Kuantitatif Offline Aktif (AI awan tidak disambungkan dalam binaan ini).",
+      )
+    }
 
     val prompt = buildPrompt(snapshot, setup, positionSize)
     return try {
@@ -112,7 +132,7 @@ class TradingAiEngine {
     } catch (e: Exception) {
       Log.e(TAG, "Gemini AI inference unavailable; using offline quant engine", e)
       offlineBaseline.copy(
-        onlineErrorNote = e.localizedMessage ?: "Mod Offline AI aktif (tiada sambungan awan).",
+        onlineErrorNote = "Mod Offline Quant AI aktif — analisis dikira secara tempatan.",
       )
     }
   }
@@ -218,7 +238,7 @@ class TradingAiEngine {
   ): Pair<String, AiEngineSource> {
     val cleanQ = question.trim()
     val offlineAnswer = generateOfflineChatAnswer(cleanQ, snapshot, setup, positionSize)
-    if (isOfflineMode) {
+    if (isOfflineMode || !isFirebaseReady()) {
       onStreamingChunk(offlineAnswer)
       return offlineAnswer to AiEngineSource.OFFLINE_QUANT
     }
@@ -251,10 +271,8 @@ class TradingAiEngine {
       throw e
     } catch (e: Exception) {
       Log.e(TAG, "Gemini chat failed; falling back to offline answer", e)
-      val errHint = e.localizedMessage ?: "tiada sambungan internet"
-      val msg = "$offlineAnswer\n\n(Nota Mod Offline: $errHint)"
-      onStreamingChunk(msg)
-      msg to AiEngineSource.OFFLINE_QUANT
+      onStreamingChunk(offlineAnswer)
+      offlineAnswer to AiEngineSource.OFFLINE_QUANT
     }
   }
 

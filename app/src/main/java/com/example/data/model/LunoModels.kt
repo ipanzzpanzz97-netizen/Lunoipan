@@ -12,6 +12,8 @@ enum class TradingPair(
   val coinGeckoId: String,
   val coinGeckoVsCurrency: String,
   val priceDecimals: Int,
+  val volumeDecimals: Int,
+  val minOrderUnits: Double,
 ) {
   XBTMYR(
     pairCode = "XBTMYR",
@@ -22,6 +24,8 @@ enum class TradingPair(
     coinGeckoId = "bitcoin",
     coinGeckoVsCurrency = "myr",
     priceDecimals = 0,
+    volumeDecimals = 4,
+    minOrderUnits = 0.0002,
   ),
   ETHMYR(
     pairCode = "ETHMYR",
@@ -32,6 +36,8 @@ enum class TradingPair(
     coinGeckoId = "ethereum",
     coinGeckoVsCurrency = "myr",
     priceDecimals = 2,
+    volumeDecimals = 4,
+    minOrderUnits = 0.001,
   ),
   SOLMYR(
     pairCode = "SOLMYR",
@@ -42,6 +48,8 @@ enum class TradingPair(
     coinGeckoId = "solana",
     coinGeckoVsCurrency = "myr",
     priceDecimals = 2,
+    volumeDecimals = 2,
+    minOrderUnits = 0.01,
   ),
   XRPMYR(
     pairCode = "XRPMYR",
@@ -52,6 +60,8 @@ enum class TradingPair(
     coinGeckoId = "ripple",
     coinGeckoVsCurrency = "myr",
     priceDecimals = 4,
+    volumeDecimals = 0,
+    minOrderUnits = 1.0,
   ),
   LTCMYR(
     pairCode = "LTCMYR",
@@ -62,6 +72,8 @@ enum class TradingPair(
     coinGeckoId = "litecoin",
     coinGeckoVsCurrency = "myr",
     priceDecimals = 2,
+    volumeDecimals = 2,
+    minOrderUnits = 0.01,
   ),
   XBTUSDC(
     pairCode = "XBTUSDC",
@@ -72,6 +84,8 @@ enum class TradingPair(
     coinGeckoId = "bitcoin",
     coinGeckoVsCurrency = "usd",
     priceDecimals = 2,
+    volumeDecimals = 4,
+    minOrderUnits = 0.0002,
   );
 
   companion object {

@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -111,9 +113,11 @@ fun PriceEmaChart(
       val c = visibleCandles[idx]
       val e50 = visibleEma50.getOrNull(idx) ?: c.close
       val e200 = visibleEma200.getOrNull(idx) ?: c.close
-      Row(
+      @OptIn(ExperimentalLayoutApi::class)
+      FlowRow(
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
       ) {
         Text(
           text = "PX ${FormatUtils.formatCurrency(c.close, quoteSymbol, priceDecimals)}",

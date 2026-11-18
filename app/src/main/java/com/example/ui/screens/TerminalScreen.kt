@@ -90,6 +90,7 @@ import com.example.data.model.TradePlanStatus
 import com.example.data.model.TradingPair
 import com.example.ui.FormatUtils
 import com.example.ui.MarketUiState
+import com.example.ui.PortfolioUiState
 import com.example.ui.QuantPulseUiState
 import com.example.ui.components.MiniPriceSparkline
 import com.example.ui.components.RsiSpeedometerGauge
@@ -549,9 +550,10 @@ private fun MetricPill(
   label: String,
   value: String,
   valueColor: androidx.compose.ui.graphics.Color,
+  modifier: Modifier = Modifier,
 ) {
   val colors = LocalQuantColors.current
-  Column {
+  Column(modifier = modifier) {
     Text(text = label, style = MaterialTheme.typography.labelSmall, color = colors.textMuted)
     Text(text = value, style = QuantMonoSmall, color = valueColor)
   }
@@ -1306,24 +1308,40 @@ private fun AiCopilotAndAutoMonitorCard(
         ) {
           Row(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
           ) {
             MetricPill(
               label = "LIMIT ENTRY",
               value = FormatUtils.formatCurrency(advice.entryLimitPrice, pair.quoteSymbol, pair.priceDecimals),
               valueColor = colors.cyanBright,
+              modifier = Modifier.weight(1f),
             )
             MetricPill(
               label = "STOP-LOSS",
               value = FormatUtils.formatCurrency(advice.stopLossPrice, pair.quoteSymbol, pair.priceDecimals),
               valueColor = colors.crimsonBright,
+              modifier = Modifier.weight(1f),
             )
             MetricPill(
               label = "TAKE PROFIT",
               value = FormatUtils.formatCurrency(advice.takeProfitPrice, pair.quoteSymbol, pair.priceDecimals),
               valueColor = colors.emeraldBright,
+              modifier = Modifier.weight(1f),
             )
           }
+        }
+
+        val liveWalletAsset =
+          (uiState.portfolioState as? PortfolioUiState.Success)
+            ?.assets
+            ?.firstOrNull { it.asset == pair.quoteAsset }
+        if (liveWalletAsset != null) {
+          Text(
+            text =
+              "Baki Luno (${pair.quoteAsset}): ${FormatUtils.formatNumber(liveWalletAsset.available, 2)} • Modal Aktif: ${FormatUtils.formatCurrency(uiState.preferences.totalCapitalMyr, pair.quoteSymbol, 0)}",
+            style = QuantMonoSmall,
+            color = colors.emeraldBright,
+          )
         }
 
         if (advice.actionSteps.isNotEmpty()) {
@@ -1618,7 +1636,7 @@ private fun LunoOrderConfirmationDialog(
           color = colors.textPrimary,
         )
         Text(
-          text = "Anggaran Unit: ${FormatUtils.formatUnits(pos.unitsToAcquire, pair.baseAsset)} (${FormatUtils.formatCurrency(pos.spotCappedPositionSize, pair.quoteSymbol, 0)})",
+          text = "Anggaran Unit: ${FormatUtils.formatUnits(pos.unitsToAcquire.coerceAtLeast(pair.minOrderUnits), pair.baseAsset)} (${FormatUtils.formatCurrency(pos.spotCappedPositionSize, pair.quoteSymbol, 2)})",
           style = QuantMonoSmall,
           color = colors.textPrimary,
         )
@@ -1627,6 +1645,27 @@ private fun LunoOrderConfirmationDialog(
           style = MaterialTheme.typography.bodySmall,
           color = colors.textSecondary,
         )
+        val liveQuoteBal =
+          (uiState.portfolioState as? PortfolioUiState.Success)
+            ?.assets
+            ?.firstOrNull { it.asset == pair.quoteAsset }
+            ?.available
+        if (liveQuoteBal != null) {
+          Text(
+            text = "Baki Luno Anda (${pair.quoteAsset}): ${FormatUtils.formatNumber(liveQuoteBal, 2)}",
+            style = QuantMonoSmall,
+            color = colors.emeraldBright,
+          )
+        }
+        if (isBuy && pos.unitsToAcquire < pair.minOrderUnits) {
+          val estMinCost = pair.minOrderUnits * limitPrice
+          Text(
+            text =
+              "Nota Had Minimum Luno: ${pair.pairCode} memerlukan sekurang-kurangnya ${pair.minOrderUnits} ${pair.baseAsset} (~${FormatUtils.formatCurrency(estMinCost, pair.quoteSymbol, 2)}). Untuk modal kecil seperti RM 10, koin seperti XRP/MYR atau LTC/MYR lebih mudah melepasi had minimum.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.amber,
+          )
+        }
         if (!uiState.credentials.isConfigured) {
           Text(
             text = "Nota: Sila simpan API Key & Secret (kebenaran Trade) dalam tab Vault terlebih dahulu untuk menghantar pesanan sebenar ke Luno.",

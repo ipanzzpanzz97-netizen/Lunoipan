@@ -235,6 +235,15 @@ class LunoRepository(
         require(creds.isConfigured) {
           "Simpan Luno API Key (kebenaran Trade) di Vault dahulu untuk hantar pesanan ke Luno."
         }
+        val safeVolume = volume.coerceAtLeast(pair.minOrderUnits)
+        val formattedVol =
+          if (pair.volumeDecimals == 0) {
+            kotlin.math.round(safeVolume).toInt().coerceAtLeast(1).toString()
+          } else {
+            String.format(java.util.Locale.US, "%.${pair.volumeDecimals}f", safeVolume)
+          }
+        val formattedPrice =
+          String.format(java.util.Locale.US, "%.${pair.priceDecimals}f", price)
         val headers =
           HmacSigner.signRequest(
             apiKeyId = creds.apiKeyId,
@@ -242,21 +251,38 @@ class LunoRepository(
             method = "POST",
             requestPath = "/api/1/postorder",
           )
-        val formattedVol = String.format(java.util.Locale.US, "%.6f", volume.coerceAtLeast(0.0001))
-        val formattedPrice =
-          String.format(java.util.Locale.US, "%.${pair.priceDecimals}f", price)
-        val response =
-          lunoApi.postLimitOrder(
-            authorization = headers.authorizationBasic,
-            timestamp = headers.timestampMs,
-            signature = headers.hmacSha256Signature,
-            pair = pair.pairCode,
-            type = if (isBuy) "BID" else "ASK",
-            volume = formattedVol,
-            price = formattedPrice,
-            postOnly = true,
-          )
-        response.orderId
+        try {
+          val response =
+            lunoApi.postLimitOrder(
+              authorization = headers.authorizationBasic,
+              timestamp = headers.timestampMs,
+              signature = headers.hmacSha256Signature,
+              pair = pair.pairCode,
+              type = if (isBuy) "BID" else "ASK",
+              volume = formattedVol,
+              price = formattedPrice,
+              postOnly = true,
+            )
+          response.orderId
+        } catch (e: retrofit2.HttpException) {
+          val rawErr = e.response()?.errorBody()?.string().orEmpty()
+          val friendlyMsg =
+            when {
+              e.code() == 401 || e.code() == 403 || rawErr.contains("permission", ignoreCase = true) ->
+                "API Key Luno tidak mempunyai kebenaran 'Trade'. Tukar kepada API Key berkeizinan Trade di Luno."
+              rawErr.contains("insufficient", ignoreCase = true) ->
+                "Baki Luno tidak mencukupi untuk pesanan $formattedVol ${pair.baseAsset} (${pair.pairCode})."
+              rawErr.contains("too small", ignoreCase = true) || rawErr.contains("minimum", ignoreCase = true) ->
+                "Jumlah pesanan terlalu kecil untuk had minimum Luno bagi ${pair.pairCode} (min ${pair.minOrderUnits} ${pair.baseAsset})."
+              rawErr.contains("post", ignoreCase = true) ->
+                "Harga pasaran berubah pantas (Post-Only dibatalkan untuk elak caj tinggi). Cuba lagi."
+              rawErr.isNotBlank() ->
+                "Luno menolak pesanan (${e.code()}): ${rawErr.take(120)}"
+              else ->
+                "Gagal menghantar pesanan Luno (HTTP ${e.code()})."
+            }
+          throw IllegalStateException(friendlyMsg, e)
+        }
       }
     }
 

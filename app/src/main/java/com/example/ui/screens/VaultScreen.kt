@@ -62,6 +62,7 @@ fun VaultScreen(
   onClearCredentials: () -> Unit,
   onRefreshBalances: () -> Unit,
   onSaveRiskRules: (Double, Double, Double) -> Unit,
+  onSyncCapitalFromLuno: () -> Unit,
   modifier: Modifier = Modifier,
 ) {
   val colors = LocalQuantColors.current
@@ -353,6 +354,16 @@ fun VaultScreen(
               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
               modifier = Modifier.fillMaxWidth().testTag("vault_capital_input"),
             )
+
+            if (uiState.portfolioState is PortfolioUiState.Success) {
+              OutlinedButton(
+                onClick = onSyncCapitalFromLuno,
+                border = BorderStroke(1.dp, colors.cyan.copy(alpha = 0.6f)),
+                modifier = Modifier.fillMaxWidth().height(48.dp).testTag("sync_luno_capital_button"),
+              ) {
+                Text("Guna Baki Luno Sebenar sebagai Modal", color = colors.cyanBright)
+              }
+            }
 
             Column {
               Row(
